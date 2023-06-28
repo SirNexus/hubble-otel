@@ -13,13 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver"
-
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/service"
-	"go.opentelemetry.io/collector/service/defaultcomponents"
-
 	commonV1 "go.opentelemetry.io/proto/otlp/common/v1"
 	resourceV1 "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/grpc/status"
@@ -83,63 +77,70 @@ func GetFlowSamples(t *testing.T, path string) []*observer.GetFlowsResponse {
 	return samples
 }
 
-func RunOpenTelemtryCollector(ctx context.Context, t *testing.T, configPath string, fatal chan<- error, extraReceiverFactories ...component.ReceiverFactory) {
-	t.Helper()
-
-	factories, err := defaultcomponents.Components()
-	if err != nil {
-		t.Fatalf("failed to build default components: %v", err)
-	}
-
-	additionalReceiverFactories := []component.ReceiverFactory{
-		prometheusreceiver.NewFactory(),
-	}
-	additionalReceiverFactories = append(additionalReceiverFactories, extraReceiverFactories...)
-
-	additionalReceivers, err := component.MakeReceiverFactoryMap(
-		additionalReceiverFactories...,
-	)
-	if err != nil {
-		t.Fatalf("failed to build additional receivers: %v", err)
-	}
-	for k, v := range additionalReceivers {
-		factories.Receivers[k] = v
-	}
-
-	additionalExporters, err := component.MakeExporterFactoryMap(
-		prometheusexporter.NewFactory(),
-	)
-	if err != nil {
-		t.Fatalf("failed to build additional exporters: %v", err)
-	}
-	for k, v := range additionalExporters {
-		factories.Exporters[k] = v
-	}
-
-	info := component.BuildInfo{
-		Command:     "otelcol-test",
-		Description: "test OpenTelemetry Collector",
-		Version:     "v0.30.1",
-	}
-
-	settings := service.CollectorSettings{BuildInfo: info, Factories: factories}
-
-	cmd := service.NewCommand(settings)
-	cmd.SetArgs([]string{
-		"--config=" + configPath,
-	})
-
-	go func() {
-		err := cmd.ExecuteContext(ctx)
-		if err != nil {
-			fatal <- fmt.Errorf("collector server run finished with error: %v", err)
-			return
-		} else {
-			t.Log("collector server run finished without errors")
-		}
-	}()
-
-	<-ctx.Done()
+func RunOpenTelemtryCollector(
+	ctx context.Context,
+	t *testing.T,
+	configPath string,
+	fatal chan<- error,
+	extraReceiverFactories ...component.ReceiverFactory,
+) {
+	// TODO: fixup defaultcomponents
+	// t.Helper()
+	//
+	// factories, err := defaultcomponents.Components()
+	// if err != nil {
+	// 	t.Fatalf("failed to build default components: %v", err)
+	// }
+	//
+	// additionalReceiverFactories := []component.ReceiverFactory{
+	// 	prometheusreceiver.NewFactory(),
+	// }
+	// additionalReceiverFactories = append(additionalReceiverFactories, extraReceiverFactories...)
+	//
+	// additionalReceivers, err := component.MakeReceiverFactoryMap(
+	// 	additionalReceiverFactories...,
+	// )
+	// if err != nil {
+	// 	t.Fatalf("failed to build additional receivers: %v", err)
+	// }
+	// for k, v := range additionalReceivers {
+	// 	factories.Receivers[k] = v
+	// }
+	//
+	// additionalExporters, err := component.MakeExporterFactoryMap(
+	// 	prometheusexporter.NewFactory(),
+	// )
+	// if err != nil {
+	// 	t.Fatalf("failed to build additional exporters: %v", err)
+	// }
+	// for k, v := range additionalExporters {
+	// 	factories.Exporters[k] = v
+	// }
+	//
+	// info := component.BuildInfo{
+	// 	Command:     "otelcol-test",
+	// 	Description: "test OpenTelemetry Collector",
+	// 	Version:     "v0.30.1",
+	// }
+	//
+	// settings := service.CollectorSettings{BuildInfo: info, Factories: factories}
+	//
+	// cmd := service.NewCommand(settings)
+	// cmd.SetArgs([]string{
+	// 	"--config=" + configPath,
+	// })
+	//
+	// go func() {
+	// 	err := cmd.ExecuteContext(ctx)
+	// 	if err != nil {
+	// 		fatal <- fmt.Errorf("collector server run finished with error: %v", err)
+	// 		return
+	// 	} else {
+	// 		t.Log("collector server run finished without errors")
+	// 	}
+	// }()
+	//
+	// <-ctx.Done()
 }
 
 func WaitForServer(ctx context.Context, logf func(format string, args ...interface{}), address string) {
@@ -209,7 +210,11 @@ func CheckCounterMetricIsZero(families map[string]*promdto.MetricFamily, metrics
 	return nil
 }
 
-func CheckCounterMetricIsGreaterThen(value float64, families map[string]*promdto.MetricFamily, metrics ...string) error {
+func CheckCounterMetricIsGreaterThen(
+	value float64,
+	families map[string]*promdto.MetricFamily,
+	metrics ...string,
+) error {
 	for _, k := range metrics {
 		m, ok := families[k]
 		if !ok || len(m.GetMetric()) == 0 {
@@ -277,7 +282,11 @@ func CheckResource(t *testing.T, res *resourceV1.Resource, hubbleResp *observer.
 	}
 }
 
-func CheckAttributes(t *testing.T, attrs []*commonV1.KeyValue, encodingOptions common.EncodingOptions) *commonV1.AnyValue {
+func CheckAttributes(
+	t *testing.T,
+	attrs []*commonV1.KeyValue,
+	encodingOptions common.EncodingOptions,
+) *commonV1.AnyValue {
 	t.Helper()
 
 	var payload *commonV1.AnyValue

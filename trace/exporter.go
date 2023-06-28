@@ -5,17 +5,14 @@ import (
 	"fmt"
 
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	traceCollectorV1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	traceV1 "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-
-	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/model/otlp"
-	"go.opentelemetry.io/collector/model/pdata"
-
-	traceCollectorV1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
-	traceV1 "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
 type BufferedTraceExporter struct {
@@ -25,7 +22,12 @@ type BufferedTraceExporter struct {
 	exportCallOptions []grpc.CallOption
 }
 
-func NewBufferedTraceExporter(otlpConn *grpc.ClientConn, bufferSize int, headers map[string]string, callOptions ...grpc.CallOption) *BufferedTraceExporter {
+func NewBufferedTraceExporter(
+	otlpConn *grpc.ClientConn,
+	bufferSize int,
+	headers map[string]string,
+	callOptions ...grpc.CallOption,
+) *BufferedTraceExporter {
 	return &BufferedTraceExporter{
 		otlpTrace:         traceCollectorV1.NewTraceServiceClient(otlpConn),
 		bufferSize:        bufferSize,
@@ -56,15 +58,19 @@ type BufferedDirectTraceExporter struct {
 	log         *logrus.Logger
 	consumer    consumer.Traces
 	bufferSize  int
-	unmarshaler pdata.TracesUnmarshaler
+	unmarshaler ptrace.Unmarshaler
 }
 
-func NewBufferedDirectTraceExporter(log *logrus.Logger, consumer consumer.Traces, bufferSize int) *BufferedDirectTraceExporter {
+func NewBufferedDirectTraceExporter(
+	log *logrus.Logger,
+	consumer consumer.Traces,
+	bufferSize int,
+) *BufferedDirectTraceExporter {
 	return &BufferedDirectTraceExporter{
 		log:         log,
 		consumer:    consumer,
 		bufferSize:  bufferSize,
-		unmarshaler: otlp.NewProtobufTracesUnmarshaler(),
+		unmarshaler: &ptrace.ProtoUnmarshaler{},
 	}
 }
 

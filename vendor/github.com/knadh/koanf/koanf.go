@@ -84,8 +84,9 @@ func NewWithConf(conf Conf) *Koanf {
 
 // Load takes a Provider that either provides a parsed config map[string]interface{}
 // in which case pa (Parser) can be nil, or raw bytes to be parsed, where a Parser
-// can be provided to parse.
-func (ko *Koanf) Load(p Provider, pa Parser) error {
+// can be provided to parse. Additionally, options can be passed which modify the
+// load behavior, such as passing a custom merge function.
+func (ko *Koanf) Load(p Provider, pa Parser, opts ...Option) error {
 	var (
 		mp  map[string]interface{}
 		err error
@@ -114,7 +115,7 @@ func (ko *Koanf) Load(p Provider, pa Parser) error {
 		}
 	}
 
-	return ko.merge(mp)
+	return ko.merge(mp, newOptions(opts))
 }
 
 // Keys returns the slice of all flattened keys in the loaded configuration
@@ -184,7 +185,7 @@ func (ko *Koanf) Cut(path string) *Koanf {
 	}
 
 	n := New(ko.conf.Delim)
-	_ = n.merge(out)
+	_ = n.merge(out, new(options))
 	return n
 }
 
@@ -196,7 +197,7 @@ func (ko *Koanf) Copy() *Koanf {
 // Merge merges the config map of a given Koanf instance into
 // the current instance.
 func (ko *Koanf) Merge(in *Koanf) error {
-	return ko.merge(in.Raw())
+	return ko.merge(in.Raw(), new(options))
 }
 
 // MergeAt merges the config map of a given Koanf instance into
@@ -214,7 +215,17 @@ func (ko *Koanf) MergeAt(in *Koanf, path string) error {
 		path: in.Raw(),
 	}, ko.conf.Delim)
 
-	return ko.merge(n)
+	return ko.merge(n, new(options))
+}
+
+// Set sets the value at a specific key.
+func (ko *Koanf) Set(key string, val interface{}) error {
+	// Unflatten the config map with the given key path.
+	n := maps.Unflatten(map[string]interface{}{
+		key: val,
+	}, ko.conf.Delim)
+
+	return ko.merge(n, new(options))
 }
 
 // Marshal takes a Parser implementation and marshals the config map into bytes,
@@ -238,7 +249,9 @@ func (ko *Koanf) UnmarshalWithConf(path string, o interface{}, c UnmarshalConf) 
 	if c.DecoderConfig == nil {
 		c.DecoderConfig = &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
-				mapstructure.StringToTimeDurationHookFunc()),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+				mapstructure.TextUnmarshallerHookFunc()),
 			Metadata:         nil,
 			Result:           o,
 			WeaklyTypedInput: true,
@@ -346,7 +359,7 @@ func (ko *Koanf) Slices(path string) []*Koanf {
 		}
 
 		k := New(ko.conf.Delim)
-		_ = k.merge(mp)
+		_ = k.merge(mp, new(options))
 		out = append(out, k)
 	}
 
@@ -388,9 +401,13 @@ func (ko *Koanf) Delim() string {
 	return ko.conf.Delim
 }
 
-func (ko *Koanf) merge(c map[string]interface{}) error {
+func (ko *Koanf) merge(c map[string]interface{}, opts *options) error {
 	maps.IntfaceKeysToStrings(c)
-	if ko.conf.StrictMerge {
+	if opts.merge != nil {
+		if err := opts.merge(c, ko.confMap); err != nil {
+			return err
+		}
+	} else if ko.conf.StrictMerge {
 		if err := maps.MergeStrict(c, ko.confMap); err != nil {
 			return err
 		}

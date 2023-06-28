@@ -4,13 +4,15 @@
 
 **koanf** (pronounced _conf_; a play on the Japanese _Koan_) is a library for reading configuration from different sources in different formats in Go applications. It is a cleaner, lighter [alternative to spf13/viper](#alternative-to-viper) with better abstractions and extensibility and fewer dependencies.
 
-koanf comes with built in support for reading configuration from files, command line flags, and environment variables, and can parse JSON, YAML, TOML, and Hashicorp HCL.
+koanf comes with built in support for reading configuration from files, command line flags, and environment variables, and can parse JSON, YAML, TOML, and Hashicorp HCL. Any external dependencies are detatched from the core into sub-packages, so only the ones that are explicitly referenced get compiled into an application.
 
-[![Build Status](https://travis-ci.com/knadh/koanf.svg?branch=master)](https://travis-ci.com/knadh/koanf) [![GoDoc](https://godoc.org/github.com/knadh/koanf?status.svg)](https://godoc.org/github.com/knadh/koanf) 
+[![Run Tests](https://github.com/knadh/koanf/actions/workflows/test.yml/badge.svg)](https://github.com/knadh/koanf/actions/workflows/test.yml) [![GoDoc](https://godoc.org/github.com/knadh/koanf?status.svg)](https://godoc.org/github.com/knadh/koanf) 
 
 ### Installation
 
-`go get -u github.com/knadh/koanf`
+```shell
+go get -u github.com/knadh/koanf
+```
 
 ### Contents
 
@@ -25,12 +27,13 @@ koanf comes with built in support for reading configuration from files, command 
 - [Setting default values](#setting-default-values)
 - [Order of merge and key case senstivity](#order-of-merge-and-key-case-sensitivity)
 - [Custom Providers and Parsers](#custom-providers-and-parsers)
+- [Custom Merge Strategies](#custom-merge-strategies)
 - [List of Providers, Parsers, and functions](#api)
 
 ### Concepts
 
-- `koanf.Provider` is a generic interface that provides configuration, for example, from files, environment variables, HTTP sources, or anywhere. The configuration can either be raw bytes that a parser can parse, or it can be a nested map[string]interface{} that can be directly loaded.
-- `koanf.Parser` is a generic interface that takes raw bytes, parses, and returns a nested map[string]interface{} representation. For example, JSON and YAML parsers.
+- `koanf.Provider` is a generic interface that provides configuration, for example, from files, environment variables, HTTP sources, or anywhere. The configuration can either be raw bytes that a parser can parse, or it can be a nested `map[string]interface{}` that can be directly loaded.
+- `koanf.Parser` is a generic interface that takes raw bytes, parses, and returns a nested `map[string]interface{}` representation. For example, JSON and YAML parsers.
 - Once loaded into koanf, configuration are values queried by a delimited key path syntax. eg: `app.server.port`. Any delimiter can be chosen.
 - Configuration from multiple sources can be loaded and merged into a koanf instance, for example, load from a file first and override certain values with flags from the command line.
 
@@ -61,7 +64,7 @@ func main() {
 	}
 
 	// Load YAML config and merge into the previously loaded config (because we can).
-	k.Load(file.Provider("mock/mock.yaml"), yaml.Parser())
+	k.Load(file.Provider("mock/mock.yml"), yaml.Parser())
 
 	fmt.Println("parent's name is = ", k.String("parent1.name"))
 	fmt.Println("parent's ID is = ", k.Int("parent1.id"))
@@ -70,11 +73,12 @@ func main() {
 ```
 
 ### Watching files for changes
-The `koanf.Provider` interface has a `Watch(cb)` method that asks a provider
-to watch for changes and trigger the given callback that can live reload the
-configuration.
+Some providers expose a `Watch()` method that makes the provider watch for changes
+in configuration and trigger a callback to reload the configuration.
+This is not goroutine safe if there are concurrent `*Get()` calls happening on the
+koanf object while it is doing a `Load()`. Such scenarios will need mutex locking.
 
-Currently, `file.Provider` supports this.
+`file, appconfig, vault, consul` providers have a `Watch()` method.
 
 
 ```go
@@ -101,7 +105,7 @@ func main() {
 	}
 
 	// Load YAML config and merge into the previously loaded config (because we can).
-	k.Load(file.Provider("mock/mock.yaml"), yaml.Parser())
+	k.Load(file.Provider("mock/mock.yml"), yaml.Parser())
 
 	fmt.Println("parent's name is = ", k.String("parent1.name"))
 	fmt.Println("parent's ID is = ", k.Int("parent1.id"))
@@ -450,7 +454,7 @@ func main() {
 	}
 
 	// Load YAML config and merge into the previously loaded config (because we can).
-	k.Load(file.Provider("mock/mock.yaml"), yaml.Parser())
+	k.Load(file.Provider("mock/mock.yml"), yaml.Parser())
 
 	fmt.Println("parent's name is = ", k.String("parent1.name"))
 	fmt.Println("parent's ID is = ", k.Int("parent1.id"))
@@ -582,9 +586,50 @@ For example: merging JSON and YAML will most likely fail because JSON treats int
 
 ### Custom Providers and Parsers
 
-A Provider can provide a nested map[string]interface{} config that can be loaded into koanf with `koanf.Load()` or raw bytes that can be parsed with a Parser (loaded using `koanf.Load()`.
+A Provider can provide a nested `map[string]interface{}` config that can be loaded into koanf with `koanf.Load()` or raw bytes that can be parsed with a Parser (loaded using `koanf.Load()`.
 
 Writing Providers and Parsers are easy. See the bundled implementations in the `providers` and `parses` directory.
+
+### Custom merge strategies
+
+By default, when merging two config sources using `Load()`, koanf recursively merges keys of nested maps (`map[string]interface{}`),
+while static values are overwritten (slices, strings, etc). This behaviour can be changed by providing a custom merge function with the `WithMergeFunc` option.
+
+```go
+package main
+
+import (
+	"errors"
+	"log"
+
+	"github.com/knadh/koanf"
+	"github.com/knadh/koanf/maps"
+	"github.com/knadh/koanf/parsers/json"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/file"
+)
+
+var conf = koanf.Conf{
+	Delim:       ".",
+	StrictMerge: true,
+}
+var k = koanf.NewWithConf(conf)
+
+func main() {
+	yamlPath := "mock/mock.yml"
+	if err := k.Load(file.Provider(yamlPath), yaml.Parser()); err != nil {
+		log.Fatalf("error loading config: %v", err)
+	}
+
+	jsonPath := "mock/mock.json"
+	if err := k.Load(file.Provider(jsonPath), json.Parser(), koanf.WithMergeFunc(func(src, dest map[string]interface{}) error {
+     // Your custom logic, copying values from src into dst
+     return nil
+    })); err != nil {
+		log.Fatalf("error loading config: %v", err)
+	}
+}
+```
 
 ## API
 
@@ -616,34 +661,46 @@ Writing Providers and Parsers are easy. See the bundled implementations in the `
 | providers/rawbytes  | `rawbytes.Provider(b []byte)`                                 | Takes a raw `[]byte` slice to be parsed with a koanf.Parser                                                                                                                           |
 | providers/vault     | `vault.Provider(vault.Config{})`                              | Hashicorp Vault provider                                                                                                                           |
 | providers/appconfig     | `vault.AppConfig(appconfig.Config{})`                              | AWS AppConfig provider                                                                                                                           |
+| providers/etcd     | `etcd.Provider(etcd.Config{})`                              | CNCF etcd provider                                                                                                                           |
+| providers/consul     | `consul.Provider(consul.Config{})`                              | Hashicorp Consul provider                                                                                                                           |
+
+### Third-party providers
+| Package             | Provider                                                      | Description                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| github.com/defensestation/koanf/providers/secretsmanager     | `vault.SecretsMananger(secretsmanager.Config{}, f func(s string) string)`                              | AWS Secrets Manager provider, takes map or string as a value from store                                                						  |
+| github.com/defensestation/koanf/providers/parameterstore     | `vault.ParameterStore(parameterstore.Config{}, f func(s string) string)`                              | AWS ParameterStore provider, an optional function that takes and returns a string to transform env variables                                                 						  |
 
 ### Bundled parsers
 
 | Package      | Parser                           | Description                                                                                                                                               |
 | ------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| parsers/json | `json.Parser()`                  | Parses JSON bytes into a nested map                                                                                                                       |
-| parsers/yaml | `yaml.Parser()`                  | Parses YAML bytes into a nested map                                                                                                                       |
-| parsers/toml | `toml.Parser()`                  | Parses TOML bytes into a nested map                                                                                                                       |
-| parsers/dotenv | `dotenv.Parser()`              | Parses DotEnv bytes into a flat map                                                                                                                       |
-| parsers/hcl  | `hcl.Parser(flattenSlices bool)` | Parses Hashicorp HCL bytes into a nested map. `flattenSlices` is recommended to be set to true. [Read more](https://github.com/hashicorp/hcl/issues/162). |
+| parsers/json       | `json.Parser()`                  | Parses JSON bytes into a nested map                                                                                                                       |
+| parsers/yaml       | `yaml.Parser()`                  | Parses YAML bytes into a nested map                                                                                                                       |
+| parsers/toml       | `toml.Parser()`                  | Parses TOML bytes into a nested map                                                                                                                       |
+| parsers/dotenv     | `dotenv.Parser()`              | Parses DotEnv bytes into a flat map                                                                                                                       |
+| parsers/hcl        | `hcl.Parser(flattenSlices bool)` | Parses Hashicorp HCL bytes into a nested map. `flattenSlices` is recommended to be set to true. [Read more](https://github.com/hashicorp/hcl/issues/162). |
+| parsers/nestedtext | `nestedtext.Parser()`              | Parses NestedText bytes into a flat map                                                                                                                 |
+| parsers/hjson		 | `hjson.Parser()`					| Parses HJSON bytes into a nested map
+																							|
 
 ### Instance functions
 
-| Method                                                       | Description                                                  |
-| ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `Load(p Provider, pa Parser) error`                          | Loads config from a Provider. If a koanf.Parser is provided, the config is assumed to be raw bytes that's then parsed with the Parser. |
-| `Keys() []string`                                            | Returns the list of flattened key paths that can be used to access config values |
-| `KeyMap() map[string][]string`                               | Returns a map of all possible key path combinations possible in the loaded nested conf map |
-| `All() map[string]interface{}`                               | Returns a flat map of flattened key paths and their corresponding config values |
-| `Raw() map[string]interface{}`                               | Returns a copy of the raw nested conf map                    |
-| `Print()`                                                    | Prints a human readable copy of the flattened key paths and their values for debugging |
-| `Sprint()`                                                   | Returns a human readable copy of the flattened key paths and their values for debugging |
-| `Cut(path string) *Koanf`                                    | Cuts the loaded nested conf map at the given path and returns a new Koanf instance with the children |
-| `Copy() *Koanf`                                              | Returns a copy of the Koanf instance                         |
-| `Merge(*Koanf)`                                              | Merges the config map of a Koanf instance into the current instance |
-| `Delete(path string)`                                        | Delete the value at the given path, and does nothing if path doesn't exist. |
-| `MergeAt(in *Koanf, path string)`                            | Merges the config map of a Koanf instance into the current instance, at the given key path. |
-| `Unmarshal(path string, o interface{}) error`                | Scans the given nested key path into a given struct (like json.Unmarshal) where fields are denoted by the `koanf` tag |
+| Method                                                                 | Description                                                  |
+|------------------------------------------------------------------------| ------------------------------------------------------------ |
+| `Load(p Provider, pa Parser, opts ...Option) error`                    | Loads config from a Provider. If a koanf.Parser is provided, the config is assumed to be raw bytes that's then parsed with the Parser. |
+| `Keys() []string`                                                      | Returns the list of flattened key paths that can be used to access config values |
+| `KeyMap() map[string][]string`                                         | Returns a map of all possible key path combinations possible in the loaded nested conf map |
+| `All() map[string]interface{}`                                         | Returns a flat map of flattened key paths and their corresponding config values |
+| `Raw() map[string]interface{}`                                         | Returns a copy of the raw nested conf map                    |
+| `Print()`                                                              | Prints a human readable copy of the flattened key paths and their values for debugging |
+| `Sprint()`                                                             | Returns a human readable copy of the flattened key paths and their values for debugging |
+| `Cut(path string) *Koanf`                                              | Cuts the loaded nested conf map at the given path and returns a new Koanf instance with the children |
+| `Copy() *Koanf`                                                        | Returns a copy of the Koanf instance                         |
+| `Merge(*Koanf)`                                                        | Merges the config map of a Koanf instance into the current instance |
+| `MergeAt(in *Koanf, path string)`                                      | Merges the config map of a Koanf instance into the current instance, at the given key path. |
+| `Set(path string, val interface{})`                                    | Shorthand wrapper around `Merge()` for directly overriding the value of a given key path. |
+| `Delete(path string)`                                                  | Delete the value at the given path, and does nothing if path doesn't exist. |
+| `Unmarshal(path string, o interface{}) error`                          | Scans the given nested key path into a given struct (like json.Unmarshal) where fields are denoted by the `koanf` tag |
 | `UnmarshalWithConf(path string, o interface{}, c UnmarshalConf) error` | Like Unmarshal but with customizable options                 |
 
 ### Getter functions
@@ -686,4 +743,5 @@ koanf is a lightweight alternative to the popular [spf13/viper](https://github.c
 - Imposes arbitrary ordering conventions (eg: flag -> env -> config etc.)
 - `Get()` returns references to slices and maps. Mutations made outside change the underlying values inside the conf map.
 - Does non-idiomatic things such as [throwing away O(1) on flat maps](https://github.com/spf13/viper/blob/3b4aca75714a37276c4b1883630bd98c02498b73/viper.go#L1524).
+- Viper treats keys that contain an empty map (eg: `my_key: {}`) as if they were not set (ie: `IsSet("my_key") == false`).
 - There are a large number of [open issues](https://github.com/spf13/viper/issues).

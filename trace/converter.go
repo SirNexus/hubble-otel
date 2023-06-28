@@ -5,7 +5,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	badger "github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v3"
 	"go.opentelemetry.io/otel/trace"
 	commonV1 "go.opentelemetry.io/proto/otlp/common/v1"
 	resourceV1 "go.opentelemetry.io/proto/otlp/resource/v1"
@@ -131,7 +131,7 @@ func (c *FlowConverter) Convert(hubbleResp *hubbleObserver.GetFlowsResponse) (pr
 		Resource: &resourceV1.Resource{
 			Attributes: common.GetAllResourceAttributes(flow, c.fallbackServiceNamePrefix),
 		},
-		InstrumentationLibrarySpans: []*traceV1.InstrumentationLibrarySpans{{
+		ScopeSpans: []*traceV1.ScopeSpans{{
 			Spans: []*traceV1.Span{span},
 		}},
 	}
